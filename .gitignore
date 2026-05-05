@@ -29,4 +29,6 @@ env/
 Thumbs.db
 
 # ADK
-.adk/
+**/.adk/
+sessions/
+storage/
