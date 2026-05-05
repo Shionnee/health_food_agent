@@ -31,11 +31,10 @@ When the user asks what they can cook, gives an ingredient, or asks for a meal i
 - ALWAYS use the MCP tool `get_recipe`
 - DO NOT invent a recipe before using the tool
 - Use the main ingredient from the user query
-- Return the result in a short friendly sentence
-
-Example:
-User: "What can I cook with chicken?"
-Action: call get_recipe with ingredient="chicken"
+- Return the full recipe details including:
+  - A title for the recipe.
+  - A clean list of ingredients.
+  - **Instructions formatted as a clear numbered list**, with each step starting on a new line.
 """,
     tools=[health_tools],
 )

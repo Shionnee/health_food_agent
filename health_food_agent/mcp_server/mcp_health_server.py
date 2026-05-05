@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 import requests
+import re
 
 mcp = FastMCP("Health-Service")
 
@@ -65,10 +66,48 @@ def get_calories(food: str) -> str:
 
 @mcp.tool()
 def get_recipe(ingredient: str, cuisine: str = "") -> str:
-    """Fetch recipe ideas from TheMealDB."""
+    """Fetch a full recipe from TheMealDB. Returns ingredients and instructions."""
 
     ingredient = ingredient.lower().strip()
     cuisine = cuisine.strip()
+
+    def fetch_details(meal_id: str) -> str:
+        try:
+            detail_res = requests.get(
+                "https://www.themealdb.com/api/json/v1/1/lookup.php",
+                params={"i": meal_id},
+                timeout=10,
+            ).json()
+            meal = detail_res.get("meals", [{}])[0]
+            if not meal:
+                return "Could not find recipe details."
+
+            name = meal.get("strMeal", "Unknown Dish")
+            raw_instructions = meal.get("strInstructions", "No instructions available.")
+            
+            # Clean up instructions: normalize newlines and strip whitespace
+            instructions = raw_instructions.replace("\r\n", "\n").replace("\r", "\n").strip()
+            
+            # If instructions lack newlines but contain step numbers (e.g., "1 ... 2 ..."), 
+            # insert newlines before those numbers to help the agent format them.
+            if instructions.count('\n') < 2:
+                instructions = re.sub(r'(?<!^)(\d+\.|\d+\s+)', r'\n\1', instructions)
+            
+            ingredients = []
+            for i in range(1, 21):
+                ing = meal.get(f"strIngredient{i}")
+                meas = meal.get(f"strMeasure{i}")
+                if ing and ing.strip():
+                    ingredients.append(f"- {ing.strip()} ({meas.strip() if meas else ''})")
+            
+            ing_list = "\n".join(ingredients)
+            return (
+                f"### Recipe: {name}\n\n"
+                f"**Ingredients:**\n{ing_list}\n\n"
+                f"**Instructions:**\n{instructions}"
+            )
+        except Exception as e:
+            return f"Error fetching details: {e}"
 
     try:
         # Try ingredient search first
@@ -79,9 +118,8 @@ def get_recipe(ingredient: str, cuisine: str = "") -> str:
         ).json()
 
         if ingredient_response.get("meals"):
-            meals = ingredient_response["meals"][:3]
-            names = ", ".join(meal["strMeal"] for meal in meals)
-            return f"Recipe ideas using {ingredient}: {names}"
+            meal_id = ingredient_response["meals"][0]["idMeal"]
+            return fetch_details(meal_id)
 
         # Try meal name search
         search_response = requests.get(
@@ -91,9 +129,8 @@ def get_recipe(ingredient: str, cuisine: str = "") -> str:
         ).json()
 
         if search_response.get("meals"):
-            meals = search_response["meals"][:3]
-            names = ", ".join(meal["strMeal"] for meal in meals)
-            return f"Recipe ideas related to {ingredient}: {names}"
+            meal_id = search_response["meals"][0]["idMeal"]
+            return fetch_details(meal_id)
 
         # Try cuisine search if cuisine was given
         if cuisine:
@@ -104,12 +141,8 @@ def get_recipe(ingredient: str, cuisine: str = "") -> str:
             ).json()
 
             if cuisine_response.get("meals"):
-                meals = cuisine_response["meals"][:3]
-                names = ", ".join(meal["strMeal"] for meal in meals)
-                return (
-                    f"I could not find an exact {ingredient} recipe, "
-                    f"but here are {cuisine} recipe ideas: {names}"
-                )
+                meal_id = cuisine_response["meals"][0]["idMeal"]
+                return fetch_details(meal_id)
 
         return (
             f"TheMealDB could not find a recipe for {ingredient}. "

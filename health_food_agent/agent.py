@@ -41,7 +41,7 @@ Action:
 1. Use calorie_agent for nutrition context.
 2. Give simple balanced advice.
 
-Keep the final answer short, friendly, and practical.
+Keep the final answer friendly and practical. If a recipe is provided, show the full details; otherwise, keep the response concise.
 """,
     sub_agents=[
         calorie_agent,
