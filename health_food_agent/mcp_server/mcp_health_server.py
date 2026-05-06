@@ -1,7 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 import requests
 import re
-
+import time  
 mcp = FastMCP("Health-Service")
 
 storage = {
@@ -12,57 +12,68 @@ storage = {
 @mcp.tool()
 def get_calories(food: str) -> str:
     """Fetch calorie data from Open Food Facts."""
-
     food_name = food.lower().strip()
 
-    try:
-        response = requests.get(
-            "https://world.openfoodfacts.org/cgi/search.pl",
-            params={
-                "search_terms": food_name,
-                "search_simple": 1,
-                "action": "process",
-                "json": 1,
-                "page_size": 30,
-                "fields": "product_name,generic_name,nutriments",
-            },
-            timeout=15,
-        )
+    KCAL_KEYS = ["energy-kcal_100g", "energy-kcal", "energy-kcal_value"]
 
-        data = response.json()
-        products = data.get("products", [])
+    def extract_kcal(nutriments: dict):
+        for key in KCAL_KEYS:
+            val = nutriments.get(key)
+            if val is not None:
+                try:
+                    f = float(val)
+                    if f > 0:
+                        return round(f)
+                except (ValueError, TypeError):
+                    continue
+        return None
 
-        if not products:
-            return f"No Open Food Facts products found for {food}."
+    headers = {"User-Agent": "HealthFoodAgent/1.0 (test@test.com)"}
 
-        checked = []
-
-        for product in products:
-            product_name = product.get("product_name") or ""
-            generic_name = product.get("generic_name") or ""
-            name = product_name or generic_name or food
-
-            nutriments = product.get("nutriments", {})
-
-            kcal = (
-                nutriments.get("energy-kcal_100g")
-                or nutriments.get("energy-kcal")
-                or nutriments.get("energy-kcal_value")
+    for attempt in range(3):  # retry up to 3 times
+        try:
+            response = requests.get(
+                "https://world.openfoodfacts.org/cgi/search.pl",
+                headers=headers,
+                params={
+                    "search_terms": food_name,
+                    "search_simple": 1,
+                    "action": "process",
+                    "json": 1,
+                    "page_size": 50,
+                    "fields": "product_name,generic_name,nutriments",
+                    "sort_by": "unique_scans_n",
+                },
+                timeout=15,
             )
 
-            checked.append(name)
+            if response.status_code == 503:
+                time.sleep(2 ** attempt)  # wait 1s, 2s, 4s between retries
+                continue
 
-            if kcal is not None:
-                return f"{name} contains approximately {kcal} kcal per 100g."
+            data = response.json()
+            products = data.get("products", [])
 
-        return (
-            f"I found Open Food Facts products for {food}, but none had calorie data. "
-            f"Checked products: {', '.join(checked[:5])}"
-        )
+            if not products:
+                return f"No products found for '{food}'."
 
-    except Exception as error:
-        return f"Could not fetch calorie data from Open Food Facts: {error}"
+            checked = []
+            for product in products:
+                product_name = (product.get("product_name") or "").strip()
+                generic_name = (product.get("generic_name") or "").strip()
+                name = product_name or generic_name or food
+                nutriments = product.get("nutriments") or {}
+                kcal = extract_kcal(nutriments)
+                checked.append(name)
+                if kcal is not None:
+                    return f"{name} contains approximately {kcal} kcal per 100g."
 
+            return f"Found products for '{food}' but none had calorie data. Checked: {', '.join(checked[:5])}"
+
+        except Exception as error:
+            return f"Could not fetch calorie data: {error}"
+
+    return f"Open Food Facts is temporarily unavailable (503). Try again in a moment."
 
 @mcp.tool()
 def get_recipe(ingredient: str, cuisine: str = "") -> str:
